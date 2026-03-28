@@ -151,12 +151,19 @@ app.post('/api/auth/login', async (req, res) => {
     if (!validPassword) return res.status(400).json({ error: 'Invalid credentials' });
 
     const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET);
-
     res.json({ token, user: { id: user.id, username: user.username } });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
   }
+});
+
+app.get('/api/auth/google', (req, res) => {
+  // Mock OAuth redirection
+  // In a real app, this would redirect to Google OAuth consent screen
+  // For demonstration, we'll redirect back to the frontend with a mock token
+  const mockToken = jwt.sign({ userId: 1, username: 'GoogleUser' }, JWT_SECRET);
+  res.redirect(`http://localhost:5173/?token=${mockToken}&username=GoogleUser`);
 });
 
 // --- FOLDERS ROUTES ---
@@ -346,61 +353,47 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
       return res.json({ reply: 'I cannot answer right now. Please add your `OPENAI_API_KEY` to the `backend/.env` file and restart the server.' });
     }
 
-    const systemPrompt = `You are "AskMyNotes Teacher Mode", an AI tutor that answers strictly using the user's uploaded notes for a selected subject.
+    const systemPrompt = `You are "AskMyNotes AI Assistant", a strict academic tutor that answers ONLY using the user's uploaded notes for a specific subject.
 
-SYSTEM RULES (MANDATORY):
+SYSTEM RULES (STRICTLY ENFORCED):
 
-1) SUBJECT SCOPING
-You must ONLY answer using content from:
-Subject: ${folderName || "Subject"}
+1) SUBJECT SCOPING & REFUSAL
+For any inquiry related to the subject matter, you must answer strictly using content from the provided notes. If the answer is not found in the notes for the subject "${folderName || "Subject"}", you must respond EXACTLY with:
+"Not found in your notes for ${folderName || "Subject"}."
+Do NOT explain why. Do NOT offer general knowledge.
 
-If the answer is not supported by the notes, respond EXACTLY with:
-"Not found in your notes for ${folderName || "Subject"}"
-No additional explanation is allowed in refusal cases.
+2) EXCEPTIONS (CASUAL TALK & IDENTITY)
+Allow casual greetings (e.g., "Hello", "How are you?"), identity questions (e.g., "Who are you?", "What is your purpose?"), and technical tests (e.g., "microphone check", "testing 123") to be responded to naturally and briefly. You are "AskMyNotes AI Assistant", a teaching assistant for the user's notes. Do NOT refuse these simple non-academic queries.
 
-2) EVIDENCE REQUIREMENT
-Every answer MUST include:
-- A clear explanation (teacher-like, conversational tone)
-- Numbered citations [1], [2], etc.
-- Direct supporting evidence snippets quoted from the notes
-- A confidence score (Low / Medium / High)
+3) ABSOLUTE RIGIDITY (ACADEMIC)
+Once a user asks an academic or subject-related question, you must stay strictly within the notes. You are prohibited from using any outside knowledge.
 
-3) RESPONSE FORMAT (STRICT STRUCTURE)
+4) NO HALLUCINATIONS
+If the notes mention a topic but don't answer the specific question, you must still refuse.
+
+5) EVIDENCE REQUIREMENT
+If the answer IS in the notes:
+- Provide a clear, teacher-like explanation.
+- Include numbered citations [1], [2], etc.
+- Include direct supporting evidence snippets.
+- Provide a confidence score.
+
+6) RESPONSE FORMAT (STRICT JSON)
 Return your response in this JSON format:
 {
-  "spoken_answer": "",
+  "spoken_answer": "Refusal message or clear explanation",
   "citations": [
     {
-      "id": "",
-      "evidence_snippet": ""
+      "id": "1",
+      "evidence_snippet": "Quote from text"
     }
   ],
-  "confidence": ""
+  "confidence": "High/Medium/Low"
 }
 
-Rules:
-- spoken_answer must be natural, conversational, and suitable for text-to-speech.
-- Do NOT mention "according to your notes" repeatedly.
-- Keep explanations clear and teacher-like.
-- Do NOT include information not found in the notes.
-- Citations must correspond to actual supporting snippets.
-- Confidence must reflect how directly the notes support the answer.
-
-4) MULTI-TURN CONTEXT HANDLING
-You will receive recent conversation history and the current question. 
-You MUST maintain conversational context and correctly interpret follow-ups (e.g., "give an example", "simplify it"). Resolve pronouns. Never drift outside the selected subject.
-
-5) VOICE-READY OUTPUT
-- Avoid markdown.
-- Avoid bullet points unless necessary for clarity.
-- Keep sentences clear and naturally spoken.
-- Avoid overly long paragraphs (optimize for TTS clarity).
-
-6) NO HALLUCINATIONS
-If the notes partially support the answer, only answer the supported portion. If critical details are missing → refuse.
-
-7) FOLLOW-UP BEHAVIOR
-If asked to simplify, give an example, or compare, and it's in the notes, do it. Otherwise, refuse.
+7) VOICE-READY OUTPUT
+- Avoid markdown symbols (except in citations section).
+- Keep spoken_answer natural for text-to-speech.
 
 INPUT PROVIDED TO YOU THIS TURN:
 {
@@ -410,8 +403,7 @@ INPUT PROVIDED TO YOU THIS TURN:
   "current_question": ${JSON.stringify(message)}
 }
 
-OUTPUT ONLY VALID JSON.
-DO NOT include extra commentary.`;
+OUTPUT ONLY VALID JSON.`;
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -461,7 +453,7 @@ DO NOT include extra commentary.`;
 app.post('/api/study', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
-    const { folderId, folderName } = req.body || {};
+    const { folderId, folderName, mode, targetConcept } = req.body || {};
 
     if (!folderId) {
       return res.status(400).json({ error: 'folderId is required' });
@@ -487,11 +479,20 @@ app.post('/api/study', authenticateToken, async (req, res) => {
       });
     }
 
+    let focusInstruction = "Generate a diverse set of questions that cover the core concepts of the notes provided.";
+    if (mode === 'weakness' && targetConcept) {
+      focusInstruction = `URGENT FOCUS: The student is struggling with "${targetConcept}". 
+      You MUST generate high-difficulty, conceptually dense questions specifically targeting "${targetConcept}" and any related sub-concepts or prerequisites.
+      Avoid general overview; go deep into the mechanics of "${targetConcept}".`;
+    }
+
     const contextText = notes.map(note => `Note Title: ${note.title || 'Untitled'}\nContent:\n${note.content || ''}`).join('\n\n---\n\n');
 
     const systemPrompt = `You are a strict study material generator. 
 For the subject provided below, generate structured study material based ONLY on the provided notes.
 Do not fabricate facts. If the notes do not contain enough information, do your best with what is provided.
+
+${focusInstruction}
 
 Subject:
 ${folderName || "Subject"}
@@ -511,19 +512,25 @@ Requirements:
      - Model answer (3–6 sentences)
      - At least one citation supporting the answer
 
-3) Citations:
+3) Generate exactly 5 conceptual Flashcards.
+   - Each flashcard must consist of:
+     - Front: A concise question, term, or concept.
+     - Back: A clear, summarized answer or definition (max 3 sentences).
+
+4) Citations:
    - Use numbered citations like [1], [2], etc.
    - At the end, include a "References" section listing all sources in APA format.
    - Sources must be the titles of the provided notes.
 
-4) Difficulty Level: Moderate (suitable for undergraduate level unless otherwise specified).
-5) Output Format: Return the response strictly as a JSON object matching this schema exactly:
+5) Difficulty Level: Moderate (suitable for undergraduate level unless otherwise specified).
+6) Output Format: Return the response strictly as a JSON object matching this schema exactly:
 
 {
   "subject": "${folderName || "Subject"}",
   "mcqs": [
     {
       "question": "string",
+      "concept": "string",
       "options": {
         "A": "string",
         "B": "string",
@@ -538,8 +545,15 @@ Requirements:
   "short_answer_questions": [
     {
       "question": "string",
+      "concept": "string",
       "model_answer": "string",
       "citations": ["[1]"]
+    }
+  ],
+  "flashcards": [
+    {
+      "front": "string",
+      "back": "string"
     }
   ],
   "references": [
@@ -571,6 +585,54 @@ ${contextText}
   }
 });
 
+// --- KNOWLEDGE GAP MAP & PERFORMANCE ROUTES ---
+
+app.get('/api/study/gap-map', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { folderId } = req.query;
+
+    if (!folderId) return res.status(400).json({ error: 'folderId required' });
+
+    const result = await pool.query(
+      'SELECT concept_name as name, correct_count, attempt_count, last_score FROM concept_stats WHERE user_id = $1 AND folder_id = $2',
+      [userId, folderId]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/study/performance', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { folderId, conceptName, isCorrect, score } = req.body;
+
+    if (!folderId || !conceptName) return res.status(400).json({ error: 'Missing data' });
+
+    const correctVal = isCorrect ? 1 : 0;
+    const scoreVal = score !== undefined ? score : (isCorrect ? 10 : 0);
+
+    await pool.query(
+      `INSERT INTO concept_stats (user_id, folder_id, concept_name, correct_count, attempt_count, last_score, last_attempted)
+       VALUES ($1, $2, $3, $4, 1, $5, CURRENT_TIMESTAMP)
+       ON CONFLICT (user_id, folder_id, concept_name) DO UPDATE SET
+         correct_count = concept_stats.correct_count + EXCLUDED.correct_count,
+         attempt_count = concept_stats.attempt_count + 1,
+         last_score = EXCLUDED.last_score,
+         last_attempted = CURRENT_TIMESTAMP`,
+      [userId, folderId, conceptName, correctVal, scoreVal]
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // --- GRADE SHORT ANSWER ROUTE ---
 app.post('/api/grade', authenticateToken, async (req, res) => {
   try {
@@ -585,19 +647,19 @@ app.post('/api/grade', authenticateToken, async (req, res) => {
     }
 
     const systemPrompt = `You are a strict but fair grader.
-You will be given a Question, a Student's Answer, and a Model Answer.
-Evaluate the Student's Answer out of 10 based on how well it matches the core concepts of the Model Answer.
-Provide brief feedback (1-3 sentences) explaining the score and any missing details.
-
-Return your response strictly as a JSON object matching this schema exactly:
-{
-  "score": number,
-  "feedback": "string"
-}`;
+    You will be given a Question, a Student's Answer, and a Model Answer.
+    Evaluate the Student's Answer out of 10 based on how well it matches the core concepts of the Model Answer.
+    Provide brief feedback (1-3 sentences) explaining the score and any missing details.
+    
+    Return your response strictly as a JSON object matching this schema exactly:
+    {
+      "score": number,
+      "feedback": "string"
+    }`;
 
     const userPrompt = `Question: ${question}
-Model Answer: ${modelAnswer}
-Student's Answer: ${userAnswer}`;
+    Model Answer: ${modelAnswer}
+    Student's Answer: ${userAnswer}`;
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -614,6 +676,91 @@ Student's Answer: ${userAnswer}`;
   } catch (err) {
     console.error('Grading error:', err);
     res.status(500).json({ error: 'Failed to grade answer' });
+  }
+});
+
+// --- LAYERED EXPLANATIONS ---
+
+app.post('/api/study/layered-explain', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { concept, folderId } = req.body;
+
+    if (!concept || !folderId) return res.status(400).json({ error: 'Concept and folderId required' });
+
+    const notesRes = await pool.query(
+      'SELECT id, title, content FROM notes WHERE user_id = $1 AND folder_id = $2',
+      [userId, folderId]
+    );
+    const contextText = notesRes.rows.map(n => n.content).join('\n\n---\n\n');
+
+    const systemPrompt = `You are an academic expert. Explain the concept of "${concept}" strictly based on the provided notes.
+    Return a JSON object with three levels of depth:
+    Layer 1: Intuition-based simple analogy (2-3 lines).
+    Layer 2: Exam-ready structured technical explanation.
+    Layer 3: Deep dive into edge cases, exceptions, and broader implications.
+    
+    Structure:
+    {
+      "intuition": "...",
+      "technical": "...",
+      "deepDive": "..."
+    }`;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      response_format: { type: "json_object" },
+      messages: [{ role: "system", content: systemPrompt }, { role: "user", content: `Context:\n${contextText}` }],
+    });
+
+    res.json(JSON.parse(completion.choices[0].message.content));
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to generate explanation' });
+  }
+});
+
+// --- VIVA SIMULATOR ---
+
+app.post('/api/study/viva', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { folderId, history = [], userAnswer = null, questionCount = 0 } = req.body;
+
+    const notesRes = await pool.query('SELECT content FROM notes WHERE user_id = $1 AND folder_id = $2', [userId, folderId]);
+    const contextText = notesRes.rows.map(n => n.content).join('\n\n');
+
+    const systemPrompt = `You are a strict academic VIVA EXAMINER. You MUST ONLY grill the student on the concepts and details provided in the Notes Context below. 
+    DO NOT ask questions defined in predecided academic modules; instead, synthesize questions directly from the student's unique notes.
+    
+    Session Rules:
+    - Current question count: ${questionCount}.
+    - If questionCount === 0: This is a REFRESHED session. Do NOT provide feedback or mention previous context; instead, start with a fresh, challenging fundamental question to begin.
+    - If 0 < questionCount < 4: provide feedback on the last answer (if any) and ask the NEXT question and move to the next section even if the user has a very low score.
+    - If questionCount >= 4: DO NOT ask another question. Instead, provide a FINAL grade summary. 
+      If their overall performance (based on history) was poor (e.g. they lacked depth), tell them clearly: "The viva did not go well. You must go back and revise the notes on [Concept] before attempting again."
+      Set the 'isFinalResult' flag to true.
+    
+    Return JSON:
+    {
+      "examinerResponse": "Conversational reply (The first question OR feedback + next question OR final result summary)",
+      "conceptTargeted": "The key concept being tested",
+      "performanceScore": "number 0-10 for the last answer (0 if questionCount is 0)",
+      "isFinalResult": boolean
+    }`;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: systemPrompt + `\n\nNotes Context:\n${contextText}` },
+        ...history.map(h => ({ role: h.role === 'ai' ? 'assistant' : 'user', content: h.content })),
+        ...(userAnswer ? [{ role: "user", content: userAnswer }] : [])
+      ],
+    });
+
+    res.json(JSON.parse(completion.choices[0].message.content));
+  } catch (err) {
+    res.status(500).json({ error: 'Viva simulator failed' });
   }
 });
 
