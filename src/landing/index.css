@@ -1,0 +1,76 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Merriweather:ital,wght@0,300;0,400;0,700;1,400&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-[#F3F0E7] text-[#2A2529] font-sans antialiased min-h-screen overflow-x-hidden;
+  }
+  ::selection {
+    @apply bg-[#2A2529] text-[#F3F0E7];
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-serif tracking-tight leading-tight;
+  }
+
+  a {
+    @apply transition-colors duration-200;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .glass-paper {
+    @apply bg-[#F3F0E7]/90 backdrop-blur-md border border-black/5 shadow-paper;
+  }
+}
+
+/* Custom scrollbar for an academic feel */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
+}
+
+/* Smooth scrolling but respect user preference */
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+/* Marker Pen Highlight Animation */
+.marker-highlight {
+  background: linear-gradient(
+    120deg,
+    rgba(42, 37, 41, 0) 0%,
+    rgba(42, 37, 41, 0.15) 100%
+  );
+  background-repeat: no-repeat;
+  background-size: 0% 100%;
+  transition: background-size 0.4s ease-out;
+}
+.group:hover .marker-highlight.group-hover\:highlighted,
+.marker-highlight.highlighted {
+  background-size: 100% 100%;
+}
