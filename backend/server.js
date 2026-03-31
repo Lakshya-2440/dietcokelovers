@@ -7,8 +7,15 @@ import dotenv from 'dotenv';
 import OpenAI from 'openai';
 import multer from 'multer';
 import pdfParse from 'pdf-parse-new';
+import { OAuth2Client } from 'google-auth-library';
 
 dotenv.config();
+
+const googleClient = new OAuth2Client(
+  process.env.GOOGLE_CLIENT_ID,
+  process.env.GOOGLE_CLIENT_SECRET,
+  process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5001/api/auth/google/callback'
+);
 
 let openai = null;
 const HF_API_KEY = process.env.HUGGINGFACE_API_KEY || process.env.HF_API_KEY || '';
@@ -159,11 +166,54 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 app.get('/api/auth/google', (req, res) => {
-  // Mock OAuth redirection
-  // In a real app, this would redirect to Google OAuth consent screen
-  // For demonstration, we'll redirect back to the frontend with a mock token
-  const mockToken = jwt.sign({ userId: 1, username: 'GoogleUser' }, JWT_SECRET);
-  res.redirect(`http://localhost:5173/?token=${mockToken}&username=GoogleUser`);
+  const url = googleClient.generateAuthUrl({
+    access_type: 'offline',
+    scope: ['https://www.googleapis.com/auth/userinfo.profile', 'https://www.googleapis.com/auth/userinfo.email'],
+  });
+  res.redirect(url);
+});
+
+app.get('/api/auth/google/callback', async (req, res) => {
+  try {
+    const { code, error } = req.query;
+    if (error || !code) {
+      console.warn('Google OAuth Warning: user cancelled or no code provided:', error || 'missing code');
+      return res.redirect('http://localhost:5173/?error=oauth_failed');
+    }
+
+    const { tokens } = await googleClient.getToken(code);
+    googleClient.setCredentials(tokens);
+
+    const ticket = await googleClient.verifyIdToken({
+      idToken: tokens.id_token,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    const payload = ticket.getPayload();
+    const { sub: googleId, name: username, email } = payload;
+
+    // Use email as username if not provided or ensure uniqueness
+    const userIdentifier = username || email.split('@')[0];
+
+    // Check if user exists, if not create
+    let result = await pool.query('SELECT * FROM users WHERE username = $1', [userIdentifier]);
+    let user;
+
+    if (result.rows.length === 0) {
+      const insertResult = await pool.query(
+        'INSERT INTO users (username) VALUES ($1) RETURNING id, username',
+        [userIdentifier]
+      );
+      user = insertResult.rows[0];
+    } else {
+      user = result.rows[0];
+    }
+
+    const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET);
+    res.redirect(`http://localhost:5173/?token=${token}&username=${user.username}`);
+  } catch (err) {
+    console.error('Google OAuth Error:', err);
+    res.redirect('http://localhost:5173/?error=oauth_failed');
+  }
 });
 
 // --- FOLDERS ROUTES ---
