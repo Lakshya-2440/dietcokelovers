@@ -1643,6 +1643,9 @@ export default function App() {
       handleLogin(tokenFromUrl, usernameFromUrl);
       // Clean up URL
       window.history.replaceState({}, document.title, window.location.pathname);
+    } else if (urlParams.get('error') === 'oauth_failed') {
+      alert('Authentication failed. Please try again.');
+      window.history.replaceState({}, document.title, window.location.pathname);
     }
 
     // Global click listener for landing page buttons
