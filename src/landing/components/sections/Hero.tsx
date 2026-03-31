@@ -175,10 +175,10 @@ export function Hero() {
 
               {/* Modern Glassy Input Area */}
               <div className="p-10 pt-0">
-                 <div className="h-16 w-full rounded-2xl border border-charcoal/10 bg-white/40 backdrop-blur-md shadow-lg flex items-center px-8 gap-4 group/input hover:border-charcoal/30 transition-all">
-                    <div className="w-1.5 h-1.5 rounded-full bg-charcoal/10 group-hover/input:bg-charcoal/40 transition-colors" />
-                    <div className="flex-1 text-charcoal/20 font-light text-sm italic">Compare with Lab Notes from Tuesday...</div>
-                    <Button size="icon" className="w-10 h-10 rounded-xl bg-charcoal text-black hover:scale-105 transition-transform">
+                 <div className="h-16 w-full rounded-2xl border border-charcoal/10 bg-white backdrop-blur-md shadow-lg flex items-center px-8 gap-4 group/input hover:border-charcoal/30 transition-all">
+                    <div className="w-1.5 h-1.5 rounded-full bg-black group-hover/input:bg-charcoal/40 transition-colors" />
+                    <div className="flex-1 text-black font-light text-sm italic">Compare with Lab Notes from Tuesday...</div>
+                    <Button size="icon" className="w-10 h-10 rounded-xl bg-charcoal text-white hover:scale-105 transition-transform">
                        <UploadCloud className="w-4 h-4" />
                     </Button>
                  </div>
